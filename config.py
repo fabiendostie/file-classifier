@@ -1,5 +1,5 @@
 # Set the path to your downloads folder
-download_folder = '/path/to/your/downloads/folder'
+download_folder = '/Users/lefab/Downloads'
 
 # Define the classification rules
 classification_rules = {
@@ -58,7 +58,7 @@ classification_rules = {
         ".pl", ".lua", ".groovy", ".scala", ".rs", ".kt", ".m", ".dart", ".pas", ".asm",
         ".vbs", ".s", ".h", ".hpp", ".ada", ".adb", ".ads", ".agda", ".asmx", ".awk",
         ".bash", ".bsh", ".cls", ".cob", ".coffee", ".cppm", ".csx", ".cu", ".cuh",
-        ".d", ".erl", ".f", ".f90", ".f95", ".fs", ".gml", ".hcl", ".hs"
+        ".d", ".erl", ".f", ".f90", ".f95", ".fs", ".gml", ".hcl", ".json", ".hs"
     ],
     "Web": [
         ".html", ".css", ".php", ".asp", ".jsp", ".aspx", ".cgi", ".xml", ".ajax",
@@ -74,7 +74,9 @@ classification_rules = {
         ".adp", ".daf", ".edb", ".fmp12", ".frx", ".itdb", ".mdbhtml", ".ndf", ".nsf", ".nv2",
         ".nyf", ".ora", ".pdm", ".prc", ".tdb"
     ],
-    "Datasets": [".csv", ".xlsx", ".json", ".sql"
+    "Datasets": [".csv", ".xlsx", ".sql"
+    ],
+    "Downloader files": [".torrent", ".nzb"
     ],
     "Fonts": [
         ".ttf", ".otf", ".woff", ".woff2", ".eot", ".sfnt", ".font", ".pfb", ".pfm", ".afm",

@@ -3,159 +3,104 @@ import shutil
 import time
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from config import (download_folder, classification_rules, GREEN, RESET, log_filename, DAYS_BEFORE_ARCHIVE, ARCHIVE_ACTION, ARCHIVE_FOLDER)
-from datetime import timedelta
+from config import download_folder, classification_rules, GREEN, RESET, log_filename, DAYS_BEFORE_ARCHIVE, ARCHIVE_ACTION, ARCHIVE_FOLDER
+from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(filename=log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Function to determine the folder to move the file to based on its extension
-def classify_file(file, rules):
-    file_extension = os.path.splitext(file)[1]
-    
-    for folder, extensions in rules.items():
-        if file_extension in extensions:
-            return folder
-    
-    return None
+def ask_sorting_preference():
+    print("Do you want to sort files into subfolders based on their dates? (yes/no)")
+    user_input = input().strip().lower()
+    return user_input == "yes"
 
-# Function to check if a file is a duplicate based on its name pattern
-def is_duplicate(file):
-    file_name, file_extension = os.path.splitext(file)
-    duplicate_pattern = re.compile(r'^(.+)\s\(\d+\)$')
-    match = duplicate_pattern.match(file_name)
-    
-    if match:
-        original_file_name = match.group(1) + file_extension
-        return original_file_name
+def ask_for_new_extension_category(unknown_extension):
+    print(f"New file extension detected: {unknown_extension}. Into which category should it be sorted?")
+    category = input().strip()
+    return category
+
+def update_classification_rules(extension, category):
+    if category in classification_rules:
+        classification_rules[category].append(extension)
     else:
-        return None
+        classification_rules[category] = [extension]
+    with open("config.py", "w") as config_file:
+        config_content = 'classification_rules = {\\n'
+        for cat, extensions in classification_rules.items():
+            extensions_str = ', '.join([f'"{ext}"' for ext in extensions])
+            config_content += f'    "{cat}": [{extensions_str}],\\n'
+        config_content += '}\\n'
+        config_file.write(config_content)
+
+def classify_and_move_existing_files_and_folders(sorting_preference_date_based):
+    script_created_dirs = [os.path.join(download_folder, category) for category in classification_rules.keys()]
+    if sorting_preference_date_based:
+        today = datetime.today().strftime('%Y-%m-%d')
+        script_created_dirs += [os.path.join(dir, today) for dir in script_created_dirs]
     
-def get_date_folder(file_path):
-    last_modified = os.path.getmtime(file_path)
-    date = datetime.fromtimestamp(last_modified).strftime('%Y-%m-%d')
-    return date    
+    folders_path = os.path.join(download_folder, "Folders")
+    script_created_dirs.append(folders_path)
+    
+    if not os.path.exists(folders_path):
+        os.makedirs(folders_path)
+    
+    for item in os.listdir(download_folder):
+        item_path = os.path.join(download_folder, item)
+        if os.path.isfile(item_path):
+            file_name = os.path.basename(item_path)
+            file_extension = os.path.splitext(file_name)[1].lower()
+            destination_category = None
+            for category, extensions in classification_rules.items():
+                if file_extension in extensions:
+                    destination_category = category
+                    break
+            if destination_category is None:
+                destination_category = "Uncategorized"
+            destination_path = os.path.join(download_folder, destination_category)
+            if sorting_preference_date_based:
+                destination_path = os.path.join(destination_path, today)
+            if not os.path.exists(destination_path):
+                os.makedirs(destination_path)
+            shutil.move(item_path, os.path.join(destination_path, file_name))
+            print(f"Moved file {file_name} to {destination_path}")
+        elif os.path.isdir(item_path) and item_path not in script_created_dirs:
+            shutil.move(item_path, os.path.join(folders_path, item))
+            print(f"Moved folder {item} to {folders_path}")
 
-# Function to classify and move existing files in the download folder
-def classify_existing_files():
-    for file in os.listdir(download_folder):
-        file_path = os.path.join(download_folder, file)
-        
-        if os.path.isfile(file_path):
-            target_folder = classify_file(file, classification_rules)
-            
-            if target_folder:
-                date_folder = get_date_folder(file_path)
-                target_path = os.path.join(download_folder, target_folder, date_folder, file)
-                
-                if not os.path.exists(os.path.dirname(target_path)):
-                    os.makedirs(os.path.dirname(target_path))
-                
-                shutil.move(file_path, target_path)
-                print(f'{GREEN}Moved {file} to {target_folder}/{date_folder}{RESET}')
-                logging.info(f'Moved {file} to {target_folder}/{date_folder}')
-                
-                # Check if the file is a duplicate and delete it if the original exists
-                original_file = is_duplicate(file)
-                if original_file:
-                    original_file_path = os.path.join(download_folder, target_folder, date_folder, original_file)
-                    if os.path.exists(original_file_path):
-                        os.remove(target_path)
-                        print(f'{GREEN}Deleted duplicate file {file}{RESET}')
-                        logging.info(f'Deleted duplicate file {file}')
-
-# Check folders for old files and either move them 
-# to an archive folder or delete them based on user preferences
-def folder_cleanup():
-    current_time = datetime.now()
-
-    for folder, extensions in classification_rules.items():
-        folder_path = os.path.join(download_folder, folder)
-        for root, _, files in os.walk(folder_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                if os.path.getmtime(file_path) < (current_time - timedelta(days=DAYS_BEFORE_ARCHIVE)).timestamp():
-                    if ARCHIVE_ACTION == "move":
-                        archive_path = os.path.join(download_folder, ARCHIVE_FOLDER)
-                        if not os.path.exists(archive_path):
-                            os.makedirs(archive_path)
-
-                        shutil.move(file_path, os.path.join(archive_path, file))
-                        print(f'{GREEN}Moved old file {file} to {ARCHIVE_FOLDER}{RESET}')
-                        logging.info(f'Moved old file {file} to {ARCHIVE_FOLDER}')
-
-                    elif ARCHIVE_ACTION == "delete":
-                        os.remove(file_path)
-                        print(f'{GREEN}Deleted old file {file}{RESET}')
-                        logging.info(f'Deleted old file {file}')
-
-
-# Custom event handler to handle file creation events
-class DownloadHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        file = event.src_path
-        if os.path.isfile(file):
-            target_folder = classify_file(file, classification_rules)
-            
-            if target_folder:
-                date_folder = get_date_folder(file)
-                target_path = os.path.join(download_folder, target_folder, date_folder, os.path.basename(file))
-                
-                if not os.path.exists(os.path.dirname(target_path)):
-                    os.makedirs(os.path.dirname(target_path))
-                
-                shutil.move(file, target_path)
-                print(f'{GREEN}Moved {file} to {target_folder}/{date_folder}{RESET}')
-                logging.info(f'Moved {file} to {target_folder}/{date_folder}')
-                
-                # Check if the file is a duplicate and delete it if the original exists
-                original_file = is_duplicate(os.path.basename(file))
-                if original_file:
-                    original_file_path = os.path.join(download_folder, target_folder, date_folder, original_file)
-                    if os.path.exists(original_file_path):
-                        os.remove(target_path)
-                        print(f'{GREEN}Deleted duplicate file {os.path.basename(file)}{RESET}')
-                        logging.info(f'Deleted duplicate file {os.path.basename(file)}')
+class MyHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        if not event.is_directory:
+            self.process(event.src_path)
+    
+    def process(self, file_path):
+        file_name = os.path.basename(file_path)
+        file_extension = os.path.splitext(file_name)[1].lower()
+        if file_extension not in {ext for exts in classification_rules.values() for ext in exts}:
+            destination_category = ask_for_new_extension_category(file_extension)
+            update_classification_rules(file_extension, destination_category)
+        print(f"File {file_name} processed.")
 
 def main():
-    # Create the necessary folders if they don't exist
-    for folder in classification_rules.keys():
-        folder_path = os.path.join(download_folder, folder)
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
-            
-    # Also ensure the ARCHIVE_FOLDER exists if the action is set to "move"
-    if ARCHIVE_ACTION == "move":
-        archive_path = os.path.join(download_folder, ARCHIVE_FOLDER)
-        if not os.path.exists(archive_path):
-            os.makedirs(archive_path)
-
-    # Classify existing files in the directory
-    classify_existing_files()
-
-    # Create and start the observer to monitor the download folder
-    event_handler = DownloadHandler()
+    sorting_preference_date_based = ask_sorting_preference()
+    print("Organizing existing files and folders...")
+    classify_and_move_existing_files_and_folders(sorting_preference_date_based)
+    
+    print("Starting file monitoring...")
     observer = Observer()
-    observer.schedule(event_handler, path=download_folder, recursive=False)
+    event_handler = MyHandler()
+    observer.schedule(event_handler, path=download_folder, recursive=True)
     observer.start()
-
-    last_cleanup_time = time.time()
-
+    print("Monitoring started. Press Ctrl+C to stop.")
     try:
         while True:
-            # If 24 hours have passed since the last cleanup
-            if time.time() - last_cleanup_time >= 86400:
-                folder_cleanup()
-                last_cleanup_time = time.time()
-
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
-
+    print("Monitoring stopped.")
 
 if __name__ == '__main__':
     main()
